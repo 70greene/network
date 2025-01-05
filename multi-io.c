@@ -15,31 +15,32 @@ int main() {
 	bind(sockfd, (struct sockaddr *)&serveraddr, sizeof(struct sockaddr));
 	listen(sockfd, 10);
 
-	fd_set fds;
-	FD_ZERO(&fds);
-	FD_SET(sockfd, &fds);
+	struct pollfd fds[1024] = {0};
+	fds[sockfd].fd = sockfd;
+	fds[sockfd].events = POLLIN;
 	int maxfd = sockfd;
 
 	while (1) {
-		fd_set s = fds;	
-		select(maxfd + 1, &s, NULL, NULL, NULL); 
-		if (FD_ISSET(sockfd, &s)) {
+		poll(fds, maxfd + 1, -1);
+		if (fds[sockfd].revents & POLLIN) {
 			struct sockaddr_in clientaddr;
 			socklen_t len;
 			int clientfd = accept(sockfd, (struct sockaddr*)&clientaddr, &len);
 			printf("Accepted: %d\n", clientfd);
 
-			FD_SET(clientfd, &fds);
+			fds[clientfd].fd = clientfd;
+			fds[clientfd].events = POLLIN;
 			maxfd = clientfd;
-		}
+		} 
 
 		for (int i = sockfd + 1; i <= maxfd; i++) {
-			if (FD_ISSET(i, &s)) {
+			if (fds[i].revents & POLLIN) {
 				char buffer[128] = {0};
 				int count = recv(i, buffer, 128, 0);
 				if (count == 0) {
-					printf("Disconnected: %d\n", i);
-					FD_CLR(i, &fds);
+					printf("Disconnected %d\n", i);
+					fds[i].fd = -1;
+					fds[i].events = 0;
 					close(i);
 					continue;
 				}
