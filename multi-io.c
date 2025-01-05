@@ -3,6 +3,23 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
+
+void *client_thread(void *arg) {
+	int clientfd = *(int *)arg;
+
+	while (1) {
+		char buffer[128] = {0};
+		int count = recv(clientfd, buffer, 128, 0);
+		if (count == 0) {
+			break;
+		}
+
+		send(clientfd, buffer, count, 0);
+		printf("clientfd: %d, count: %d, buffer: %s\n", clientfd, count, buffer);
+	}
+	close(clientfd);
+}
 
 int main() {
 	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -14,23 +31,16 @@ int main() {
 	bind(sockfd, (struct sockaddr *)&serveraddr, sizeof(struct sockaddr));
 	listen(sockfd, 10);
 
-	struct sockaddr_in clientaddr;
-	socklen_t len;
-	int clientfd = accept(sockfd, (struct sockaddr *)&clientaddr, &len);
-	printf("Accepted\n");
-
 	while (1) {
-		char buffer[128] = {0};
-		int count = recv(clientfd, buffer, 128, 0);
-		if (count == 0) {
-			break;
-		}
-		send(clientfd, buffer, count, 0);
-		printf("sockfd: %d, clientfd: %d, count: %d, buffer: %s\n", sockfd, clientfd, count, buffer);
+		struct sockaddr_in clientaddr;
+		socklen_t len;
+		int clientfd = accept(sockfd, (struct sockaddr *)&clientaddr, &len);
+		printf("Accepted: %d\n", clientfd);
+
+		pthread_t thid;
+		pthread_create(&thid, NULL, client_thread, &clientfd);
 	}
-	//  ESTABLISHED -> TIME_WAIT, if ended by server side
-	
-	close(clientfd);
+
 	close(sockfd);
 	return 0;
 }
