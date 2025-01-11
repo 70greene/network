@@ -5,6 +5,12 @@
 #include <unistd.h>
 #include <sys/epoll.h>
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+// ./wrk -c 100 -d 10s -t 50 http://192.168.0.111:2048
+
 #define BUFFER_LENGTH 1024
 
 typedef int (*RCALLBACK)(int fd);
@@ -19,6 +25,8 @@ struct conn_item {
 	char wbuffer[BUFFER_LENGTH];
 	int wlen;
 
+	char resource[BUFFER_LENGTH];  // endpoint 
+
 	union {
 		RCALLBACK accept_callback;
 		RCALLBACK recv_callback;
@@ -29,6 +37,28 @@ struct conn_item {
 struct conn_item connlist[1024] = {0};
 
 int epfd = 0;
+
+typedef struct conn_item connection_t;
+
+int http_request(connection_t *conn) {
+	return 0;
+}
+
+int http_response(connection_t *conn) {
+	int filefd = open("index.html", O_RDONLY);
+	struct stat stat_buf;
+	fstat(filefd, &stat_buf);
+	conn->wlen = sprintf(conn->wbuffer, 
+		"HTTP/1.1 200 OK\r\n"
+		"Accept-Ranges: bytes\r\n"
+		"Content-Length: %ld\r\n"
+		"Content-Type: text/html\r\n"
+		"Date: Sat, 06 Aug 2023 13:16:46 GMT\r\n\r\n", stat_buf.st_size);
+	int count = read(filefd, conn->wbuffer + conn->wlen, BUFFER_LENGTH-conn->wlen);
+	conn->wlen += count;
+
+	return conn->wlen;
+}
 
 int set_event(int fd, int event, int flag) {
 	struct epoll_event ev;
@@ -46,7 +76,7 @@ int accept_cb(int fd) {
 	struct sockaddr_in clientaddr;
 	socklen_t len;
 	int clientfd = accept(fd, (struct sockaddr*)&clientaddr, &len);
-	printf("Accepted %d\n", clientfd);
+	// printf("Accepted %d\n", clientfd);
 
 	set_event(clientfd, EPOLLIN, 1);
 	connlist[clientfd].fd = clientfd;
@@ -66,16 +96,15 @@ int recv_cb(int fd) {
 	int idx = connlist[fd].rlen;
 	int count = recv(fd, rbuffer + idx, BUFFER_LENGTH - idx, 0);
 	if (count == 0) {
-		printf("Disconnected %d\n", fd);
+		// printf("Disconnected %d\n", fd);
 		epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);		
 		close(fd);
 		return -1;
 	}
 	connlist[fd].rlen += count;
 
-	memcpy(connlist[fd].wbuffer, connlist[fd].rbuffer, connlist[fd].rlen);
-	connlist[fd].wlen = connlist[fd].rlen;
-	connlist[fd].rlen = 0;
+	http_request(&connlist[fd]);
+	http_response(&connlist[fd]);
 
 	set_event(fd, EPOLLOUT, 0);
 	return count;
@@ -112,10 +141,10 @@ int main() {
 			int connfd = events[i].data.fd;
 			if (events[i].events & EPOLLIN) {
 				int count = connlist[connfd].recv_t.recv_callback(connfd);
-				printf("%d received, count: %d <-- buffer: %s\n", connfd, count, connlist[connfd].rbuffer);
+				// printf("%d received, count: %d <-- buffer: %s\n", connfd, count, connlist[connfd].rbuffer);
 			} else if (events[i].events & EPOLLOUT) {
 				connlist[connfd].send_callback(connfd);
-				printf("%d sent--> buffer: %s\n",  connfd, connlist[connfd].wbuffer);
+				// printf("%d sent--> buffer: %s\n",  connfd, connlist[connfd].wbuffer);
 			}
 		}
 	}
