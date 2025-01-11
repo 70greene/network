@@ -5,6 +5,14 @@
 #include <unistd.h>
 #include <sys/epoll.h>
 
+#define BUFFER_LENGTH 1024
+
+struct conn_item {
+	int idx;
+	char buffer[BUFFER_LENGTH];
+};
+struct conn_item connlist[1024] = {0};
+
 int main() {
 	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
 	struct sockaddr_in serveraddr;
@@ -34,17 +42,19 @@ int main() {
 				epoll_ctl(epfd, EPOLL_CTL_ADD, clientfd, &ev);
 				printf("Accepted: %d\n", clientfd);
 			} else if (events[i].events & EPOLLIN) {
-				char buffer[128] = {0};
-				int count = recv(connfd, buffer, 128, 0);
+				int idx = connlist[connfd].idx;
+				char *buffer = connlist[connfd].buffer;
+				int count = recv(connfd, buffer + idx, BUFFER_LENGTH - idx, 0);
 				if (count == 0) {
 					printf("Disconnected %d\n", connfd);
-					epoll_ctl(epfd, EPOLL_CTL_DEL, connfd, NULL);		
+					epoll_ctl(epfd, EPOLL_CTL_DEL, connfd, NULL);
 					close(i);
 					continue;
 				}
+				connlist[connfd].idx += count;
 				
-				send(connfd, buffer, count, 0);
-				printf("clientfd: %d, count: %d, buffer: %s\n", connfd, count, buffer);
+				send(connfd, buffer, connlist[connfd].idx, 0);
+				printf("clientfd: %d, count: %d, buffer: %s\n", connfd, connlist[connfd].idx, buffer);
 			}
 		}
 	}
