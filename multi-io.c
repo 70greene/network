@@ -11,7 +11,7 @@
 
 // ./wrk -c 100 -d 10s -t 50 http://192.168.0.111:2048
 
-#define BUFFER_LENGTH 1024
+#define BUFFER_LENGTH 512
 
 typedef int (*RCALLBACK)(int fd);
 int accept_cb(int fd);
@@ -34,7 +34,7 @@ struct conn_item {
 	RCALLBACK send_callback;
 };
 
-struct conn_item connlist[1024] = {0};
+struct conn_item connlist[1024 * 1024] = {0};
 
 int epfd = 0;
 
@@ -72,6 +72,9 @@ int set_event(int fd, int event, int flag) {
 	}
 }
 
+struct timeval start_time;
+#define TIME_SUB_MS(tv1, tv2)  ((tv1.tv_sec - tv2.tv_sec) * 1000 + (tv1.tv_usec - tv2.tv_usec) / 1000)
+
 int accept_cb(int fd) {
 	struct sockaddr_in clientaddr;
 	socklen_t len;
@@ -87,6 +90,14 @@ int accept_cb(int fd) {
 
 	connlist[clientfd].recv_t.recv_callback = recv_cb;
 	connlist[clientfd].send_callback = send_cb;
+
+	if ((clientfd % 1000) == 999) {
+		struct timeval cur_time;
+		gettimeofday(&cur_time, NULL);
+		int time_used = TIME_SUB_MS(tv_cur, zvoice_king);
+		memcpy(&start_time, &cur_time, sizeof(struct timeval));
+		printf("clientfd : %d, time_used: %d\n", clientfd, time_used);
+	}
 
 	return clientfd;
 }
@@ -118,21 +129,29 @@ int send_cb(int fd) {
 	return count;
 }
 
-int main() {
+int init_server(unsigned short port) {
 	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
 	struct sockaddr_in serveraddr;
 	memset(&serveraddr, 0, sizeof(struct sockaddr_in));
 	serveraddr.sin_family = AF_INET;
 	serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
-	serveraddr.sin_port = htons(2048);
+	serveraddr.sin_port = htons(port);
 	bind(sockfd, (struct sockaddr *)&serveraddr, sizeof(struct sockaddr));
 	listen(sockfd, 10);
+	return sockfd;
+}
 
-	connlist[sockfd].fd = sockfd;
-	connlist[sockfd].recv_t.accept_callback = accept_cb;
-
+int main() {
+	int port_count = 20;
+	unsigned short port = 2048;
 	epfd = epoll_create(1);
-	set_event(sockfd, EPOLLIN, 1);
+	for (int i = 0; i < port_count; i++) {
+		int sockfd = init_server(port + i);
+		connlist[sockfd].fd = sockfd;
+		connlist[sockfd].recv_t.accept_callback = accept_cb;
+		set_event(sockfd, EPOLLIN, 1);
+	}
+	gettimeofday(&start_time, NULL);
 
 	struct epoll_event events[1024] = {0};
 	while (1) {
@@ -149,6 +168,5 @@ int main() {
 		}
 	}
 
-	close(sockfd);
 	return 0;
 }
